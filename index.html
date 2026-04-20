@@ -165,10 +165,41 @@
     font-size: 15px;
     font-weight: 500;
     color: var(--morandi-2);
-    margin-bottom: 12px;
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .today-mode-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 13px;
+    border-radius: 100px;
+    border: 1.5px solid var(--lavender-mid);
+    background: white;
+    font-size: 12px;
+    font-family: 'Noto Sans TC', sans-serif;
+    color: var(--lavender-mid);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .today-mode-btn:hover {
+    background: var(--lavender);
+    border-color: var(--lavender-mid);
+    box-shadow: 0 2px 8px rgba(180,160,230,0.2);
+  }
+
+  .today-mode-btn.mode-overdue {
+    background: #FFF5F5;
+    border-color: #E0A8A8;
+    color: #C08080;
+  }
+
+  .today-mode-btn.mode-overdue:hover {
+    background: #FFEAEA;
   }
 
   .today-banner h2 .emoji { font-size: 18px; }
@@ -691,7 +722,10 @@
 <!-- Today's 3 Things -->
 <div style="max-width:1400px;margin:0 auto 28px;padding:0 24px;">
   <div class="today-banner">
-    <h2><span class="emoji">🌸</span> 今日3件事 <span style="font-size:12px;font-weight:400;color:var(--text-light);margin-left:6px;">每天建議可以做的3個目標</span></h2>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+      <h2 style="margin-bottom:0;"><span class="emoji">🌸</span> 今日3件事 <span style="font-size:12px;font-weight:400;color:var(--text-light);margin-left:6px;">每天建議可以做的3個目標</span></h2>
+      <button class="today-mode-btn" id="todayModeBtn" onclick="toggleTodayMode()"></button>
+    </div>
     <div class="today-items" id="todayItems">
       <div style="font-size:13px;color:var(--text-light);font-style:italic;">載入目標後顯示...</div>
     </div>
@@ -1020,6 +1054,31 @@ function isOldGoal(g) {
   return (Date.now() - updated.getTime()) > 7 * 24 * 60 * 60 * 1000;
 }
 
+// === TODAY MODE ===
+let todayMode = localStorage.getItem('v2026_today_mode') || 'overdue'; // 'random' | 'overdue'
+
+function toggleTodayMode() {
+  todayMode = todayMode === 'overdue' ? 'random' : 'overdue';
+  localStorage.setItem('v2026_today_mode', todayMode);
+  // 清掉今日快取，強制重抽
+  localStorage.removeItem(TODAY_KEY);
+  updateTodayItems();
+  updateTodayModeBtn();
+  showToast(todayMode === 'random' ? '🎲 切換為隨機模式' : '⚠️ 切換為優先久未更新模式');
+}
+
+function updateTodayModeBtn() {
+  const btn = document.getElementById('todayModeBtn');
+  if (!btn) return;
+  if (todayMode === 'random') {
+    btn.textContent = '🎲 隨機模式';
+    btn.className = 'today-mode-btn';
+  } else {
+    btn.textContent = '⚠️ 優先久未更新';
+    btn.className = 'today-mode-btn mode-overdue';
+  }
+}
+
 // === TODAY 3 ITEMS ===
 function getTodayPicks() {
   let picks = [];
@@ -1028,20 +1087,26 @@ function getTodayPicks() {
     if (stored) picks = JSON.parse(stored);
   } catch(e) {}
 
-  // Validate picks still exist
+  // Validate picks still exist and are incomplete
   const allGoals = SECTIONS.flatMap(s => (goals[s] || []).filter(g => !g.completed).map(g => ({...g, _section: s})));
   picks = picks.filter(p => allGoals.some(g => g.id === p.id));
 
   if (picks.length < 3 && allGoals.length > 0) {
-    // Fill up picks - prioritize overdue
-    const overdue = allGoals.filter(g => isOldGoal(g) && !picks.some(p => p.id === g.id));
-    const rest = allGoals.filter(g => !isOldGoal(g) && !picks.some(p => p.id === g.id));
-    const pool = [...overdue, ...rest];
-    // Shuffle rest
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+    const alreadyPicked = picks.map(p => p.id);
+    let pool;
+
+    if (todayMode === 'overdue') {
+      // 優先選超過7天沒動的
+      const overdue = allGoals.filter(g => isOldGoal(g) && !alreadyPicked.includes(g.id));
+      const rest = allGoals.filter(g => !isOldGoal(g) && !alreadyPicked.includes(g.id));
+      shuffle(rest);
+      pool = [...overdue, ...rest];
+    } else {
+      // 純隨機
+      pool = allGoals.filter(g => !alreadyPicked.includes(g.id));
+      shuffle(pool);
     }
+
     while (picks.length < 3 && pool.length > 0) {
       picks.push(pool.shift());
     }
@@ -1051,7 +1116,15 @@ function getTodayPicks() {
   return picks;
 }
 
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
 function updateTodayItems() {
+  updateTodayModeBtn();
   const picks = getTodayPicks();
   const container = document.getElementById('todayItems');
   if (picks.length === 0) {
